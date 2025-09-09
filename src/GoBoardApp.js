@@ -5,7 +5,7 @@ export default function GoBoardApp() {
   const [board, setBoard] = useState(() => createBoard(19)); // 0 empty, 1 black, 2 white
   const [turn, setTurn] = useState(1); // 1 = Black, 2 = White
   const [hover, setHover] = useState(null);
-
+  const [ko, setKo] = useState(null); // {r,c} point forbidden for immediate recapture
   // --- responsive sizing + zoom ---
   const wrapperRef = useRef(null);
   const [px, setPx] = useState(480); // base board pixels (auto)
@@ -15,6 +15,8 @@ export default function GoBoardApp() {
     setBoard(createBoard(size));
     setTurn(1);
     setHover(null);
+    setKo(null);
+    setKo(null);
   }, [size]);
 
   // Observe container width and fit board into it (min 320, max 560)
@@ -32,8 +34,10 @@ export default function GoBoardApp() {
   const padding = 32;
   const cell = (px - padding * 2) / (size - 1);
 
-  // ---- GAME LOGIC: captures (remove stones with 0 liberties) ----
+  // ---- GAME LOGIC: captures + ko ----
   function playAt(r, c) {
+    // Ko: forbid immediate recapture at ko point
+    if (ko && ko.r === r && ko.c === c) return;
     if (board[r][c] !== 0) return;
 
     const color = turn;
@@ -44,7 +48,7 @@ export default function GoBoardApp() {
     // 1) remove adjacent enemy groups with 0 liberties
     const adj = neighbors(r, c, size);
     const seenEnemy = new Set();
-    let capturedStones = 0;
+    let captured = [];
 
     for (const [ar, ac] of adj) {
       if (next[ar][ac] !== enemy) continue;
@@ -57,25 +61,35 @@ export default function GoBoardApp() {
         // capture: remove the entire enemy group
         for (const [gr, gc] of group) {
           next[gr][gc] = 0;
-          capturedStones++;
+          captured.push([gr, gc]);
         }
       }
     }
 
     // 2) check suicide: if our own group now has 0 liberties and we didn't capture anything, move is illegal
     const myGroup = getGroup(next, r, c, size);
-    const myLibs = countLiberties(next, myGroup, size);
-    if (myLibs === 0 && capturedStones === 0) {
+    const myLibs = libertySet(next, myGroup, size);
+    if (myLibs.size === 0 && captured.length === 0) {
       // illegal (suicide) — do nothing
       return;
     }
 
-    // 3) commit move
+    // 3) Ko logic: if exactly one stone was captured and our group has exactly one liberty
+    // and that liberty equals the captured point, set ko there (one-turn ban)
+    let newKo = null;
+    if (captured.length === 1 && myLibs.size === 1) {
+      const onlyLib = [...myLibs][0];
+      const [lr, lc] = onlyLib.split(",").map(Number);
+      const [cr, cc] = captured[0];
+      if (lr === cr && lc === cc) newKo = { r: cr, c: cc };
+    }
+
     setBoard(next);
     setTurn(color === 1 ? 2 : 1);
+    setKo(newKo);
   }
 
-  // --- star (hoshi) points for 9x9 / 13x13 / 19x19 ---
+  // --- star (hoshi) points ---
   function getStarTriplets(n) {
     if (n === 19) return [3, 9, 15];
     if (n === 13) return [3, 6, 9];
@@ -263,13 +277,17 @@ function getGroup(board, r, c, n) {
 }
 
 function countLiberties(board, group, n) {
+  return libertySet(board, group, n).size;
+}
+
+function libertySet(board, group, n) {
   const libs = new Set();
   for (const [r, c] of group) {
     for (const [nr, nc] of neighbors(r, c, n)) {
       if (board[nr][nc] === 0) libs.add(nr + "," + nc);
     }
   }
-  return libs.size;
+  return libs;
 }
 
 function cloneBoard(b) {
