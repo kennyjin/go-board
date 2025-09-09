@@ -1,4 +1,18 @@
 import React, { useEffect, useRef, useState } from "react";
+import GoBoard from "./GoBoard";
+import BoardControls from "./BoardControls";
+import Header from "./Header";
+import {
+  createBoard,
+  inBounds,
+  neighbors,
+  getGroup,
+  libertySet,
+  countLiberties,
+  cloneBoard,
+  safeAt,
+  getStarTriplets,
+} from "./goUtils";
 
 export default function GoBoardApp() {
   const [size, setSize] = useState(19); // 9, 13, 19
@@ -107,221 +121,36 @@ export default function GoBoardApp() {
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 p-6 flex flex-col items-center">
-      <header className="w-full max-w-3xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-        <h1 className="text-xl sm:text-2xl">Go Board</h1>
-        <div className="flex items-center gap-3 text-sm">
-          <label className="flex items-center gap-2">
-            <span className="opacity-80">Zoom:</span>
-            <input
-              type="range"
-              min="50"
-              max="150"
-              step="5"
-              value={zoom}
-              onChange={(e) => setZoom(Number(e.target.value))}
-            />
-            <span>{zoom}%</span>
-          </label>
-          <label className="flex items-center gap-2">
-            <span className="opacity-80">Board:</span>
-            <select
-              value={size}
-              onChange={(e) => setSize(Number(e.target.value))}
-              className="bg-neutral-900 rounded px-2 py-1 border border-neutral-800"
-            >
-              <option value={9}>9×9</option>
-              <option value={13}>13×13</option>
-              <option value={19}>19×19</option>
-            </select>
-          </label>
-        </div>
-      </header>
-
+      <Header>
+        <BoardControls
+          zoom={zoom}
+          setZoom={setZoom}
+          size={size}
+          setSize={setSize}
+        />
+      </Header>
       <div className="w-full max-w-3xl" ref={wrapperRef}>
         <div style={{ width: (px * zoom) / 100, height: (px * zoom) / 100 }}>
-          <svg
-            viewBox={`0 0 ${px} ${px}`}
-            width={(px * zoom) / 100}
-            height={(px * zoom) / 100}
-            className="block"
-            onMouseLeave={() => setHover(null)}
-          >
-            {/* Grid lines */}
-            {Array.from({ length: size }, (_, i) => (
-              <line
-                key={`v-${i}`}
-                x1={padding + i * cell}
-                y1={padding}
-                x2={padding + i * cell}
-                y2={px - padding}
-                stroke="#1f1f1f"
-                strokeWidth={1.25}
-              />
-            ))}
-            {Array.from({ length: size }, (_, i) => (
-              <line
-                key={`h-${i}`}
-                x1={padding}
-                y1={padding + i * cell}
-                x2={px - padding}
-                y2={padding + i * cell}
-                stroke="#1f1f1f"
-                strokeWidth={1.25}
-              />
-            ))}
-
-            {/* Star (hoshi) points */}
-            {starCoords.map((pt, idx) => (
-              <circle
-                key={`star-${idx}`}
-                cx={padding + pt.c * cell}
-                cy={padding + pt.r * cell}
-                r={size === 19 ? 4 : size === 13 ? 3 : 2.5}
-                fill="#1f1f1f"
-              />
-            ))}
-
-            {/* Ko marker (optional, subtle) */}
-            {ko && (
-              <circle
-                cx={padding + ko.c * cell}
-                cy={padding + ko.r * cell}
-                r={cell * 0.18}
-                fill="none"
-                stroke="#b45309"
-                strokeDasharray="2,2"
-                strokeWidth={1.25}
-              />
-            )}
-
-            {/* Hover ghost stone (guarded) */}
-            {hover &&
-              inBounds(hover.r, hover.c, size) &&
-              safeAt(board, hover.r, hover.c) === 0 && (
-                <circle
-                  cx={padding + hover.c * cell}
-                  cy={padding + hover.r * cell}
-                  r={cell * 0.45}
-                  fill={turn === 1 ? "black" : "white"}
-                  opacity={0.45}
-                  stroke="#111"
-                />
-              )}
-
-            {/* Stones */}
-            {board.map((row, r) =>
-              row.map((v, c) => {
-                if (v === 0) return null;
-                return (
-                  <circle
-                    key={`s-${r}-${c}`}
-                    cx={padding + c * cell}
-                    cy={padding + r * cell}
-                    r={cell * 0.45}
-                    fill={v === 1 ? "black" : "white"}
-                    stroke="#111"
-                  />
-                );
-              })
-            )}
-
-            {/* Click/hover hotspots */}
-            {Array.from({ length: size }, (_, r) =>
-              Array.from({ length: size }, (_, c) => (
-                <rect
-                  key={`hit-${r}-${c}`}
-                  x={padding + c * cell - cell / 2}
-                  y={padding + r * cell - cell / 2}
-                  width={cell}
-                  height={cell}
-                  fill="transparent"
-                  onMouseEnter={() => setHover({ r, c })}
-                  onClick={() => playAt(r, c)}
-                  style={{
-                    cursor:
-                      safeAt(board, r, c) === 0 ? "pointer" : "not-allowed",
-                  }}
-                />
-              ))
-            )}
-          </svg>
+          <GoBoard
+            size={size}
+            board={board}
+            turn={turn}
+            hover={hover}
+            ko={ko}
+            px={px}
+            zoom={zoom}
+            padding={padding}
+            cell={cell}
+            starCoords={starCoords}
+            setHover={setHover}
+            playAt={playAt}
+            safeAt={safeAt}
+            inBounds={inBounds}
+          />
         </div>
       </div>
     </div>
   );
 }
 
-/* ================= Helpers ================= */
-
-function createBoard(n) {
-  return Array.from({ length: n }, () => Array.from({ length: n }, () => 0));
-}
-
-function inBounds(r, c, n) {
-  return r >= 0 && r < n && c >= 0 && c < n;
-}
-
-function neighbors(r, c, n) {
-  const dirs = [
-    [1, 0],
-    [-1, 0],
-    [0, 1],
-    [0, -1],
-  ];
-  const res = [];
-  for (const [dr, dc] of dirs) {
-    const nr = r + dr;
-    const nc = c + dc;
-    if (inBounds(nr, nc, n)) res.push([nr, nc]);
-  }
-  return res;
-}
-
-function getGroup(b, r, c, n) {
-  const color = b[r][c];
-  const stack = [[r, c]];
-  const seen = new Set([r + "," + c]);
-  const group = [];
-  while (stack.length) {
-    const [cr, cc] = stack.pop();
-    group.push([cr, cc]);
-    for (const [nr, nc] of neighbors(cr, cc, n)) {
-      if (b[nr][nc] !== color) continue;
-      const k = nr + "," + nc;
-      if (!seen.has(k)) {
-        seen.add(k);
-        stack.push([nr, nc]);
-      }
-    }
-  }
-  return group;
-}
-
-function libertySet(b, group, n) {
-  const libs = new Set();
-  for (const [r, c] of group) {
-    for (const [nr, nc] of neighbors(r, c, n)) {
-      if (b[nr][nc] === 0) libs.add(nr + "," + nc);
-    }
-  }
-  return libs;
-}
-
-function countLiberties(b, group, n) {
-  return libertySet(b, group, n).size;
-}
-
-function cloneBoard(b) {
-  return b.map((row) => row.slice());
-}
-
-function safeAt(b, r, c) {
-  return b[r] && typeof b[r][c] !== "undefined" ? b[r][c] : 0;
-}
-
-function getStarTriplets(n) {
-  if (n === 19) return [3, 9, 15];
-  if (n === 13) return [3, 6, 9];
-  if (n === 9) return [2, 4, 6];
-  return [];
-}
+// ...helpers moved to goUtils.js...
