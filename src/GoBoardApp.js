@@ -1,25 +1,24 @@
 import React, { useEffect, useRef, useState } from "react";
 
 export default function GoBoardApp() {
-  const [size, setSize] = useState(19);
+  const [size, setSize] = useState(19); // 9, 13, 19
   const [board, setBoard] = useState(() => createBoard(19)); // 0 empty, 1 black, 2 white
   const [turn, setTurn] = useState(1); // 1 = Black, 2 = White
-  const [hover, setHover] = useState(null);
-  const [ko, setKo] = useState(null); // {r,c} point forbidden for immediate recapture
-  // --- responsive sizing + zoom ---
+  const [hover, setHover] = useState(null); // {r,c} or null
+  const [ko, setKo] = useState(null); // {r,c} or null
+
+  // Responsive sizing + zoom
   const wrapperRef = useRef(null);
-  const [px, setPx] = useState(480); // base board pixels (auto)
-  const [zoom, setZoom] = useState(100); // 50–150%
+  const [px, setPx] = useState(480); // base board pixels (auto-fitted)
+  const [zoom, setZoom] = useState(100); // 50–150 (%)
 
   useEffect(() => {
     setBoard(createBoard(size));
     setTurn(1);
     setHover(null);
     setKo(null);
-    setKo(null);
   }, [size]);
 
-  // Observe container width and fit board into it (min 320, max 560)
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
@@ -34,28 +33,37 @@ export default function GoBoardApp() {
   const padding = 32;
   const cell = (px - padding * 2) / (size - 1);
 
-  // ---- GAME LOGIC: captures + ko ----
+  // ---- GAME LOGIC (captures + suicide + ko) ----
   function playAt(r, c) {
+    // Ignore out-of-bounds clicks (can happen during size change)
+    if (!inBounds(r, c, size)) return;
+
     // Ko: forbid immediate recapture at ko point
     if (ko && ko.r === r && ko.c === c) return;
-    if (board[r][c] !== 0) return;
+
+    if (safeAt(board, r, c) !== 0) return;
 
     const color = turn;
     const enemy = color === 1 ? 2 : 1;
+
     let next = cloneBoard(board);
     next[r][c] = color; // tentatively place
 
     // 1) remove adjacent enemy groups with 0 liberties
     const adj = neighbors(r, c, size);
     const seenEnemy = new Set();
-    let captured = [];
+    const captured = [];
 
     for (const [ar, ac] of adj) {
-      if (next[ar][ac] !== enemy) continue;
+      if (!inBounds(ar, ac, size)) continue;
+      if (safeAt(next, ar, ac) !== enemy) continue;
+
       const key = ar + "," + ac;
       if (seenEnemy.has(key)) continue;
+
       const group = getGroup(next, ar, ac, size);
       group.forEach(([gr, gc]) => seenEnemy.add(gr + "," + gc));
+
       const libs = countLiberties(next, group, size);
       if (libs === 0) {
         // capture: remove the entire enemy group
@@ -66,22 +74,24 @@ export default function GoBoardApp() {
       }
     }
 
-    // 2) check suicide: if our own group now has 0 liberties and we didn't capture anything, move is illegal
+    // 2) suicide check: if our own group has 0 liberties and we didn't capture anything, it's illegal
     const myGroup = getGroup(next, r, c, size);
-    const myLibs = libertySet(next, myGroup, size);
-    if (myLibs.size === 0 && captured.length === 0) {
-      // illegal (suicide) — do nothing
+    const myLibsSet = libertySet(next, myGroup, size);
+    if (myLibsSet.size === 0 && captured.length === 0) {
+      // illegal (suicide)
       return;
     }
 
-    // 3) Ko logic: if exactly one stone was captured and our group has exactly one liberty
-    // and that liberty equals the captured point, set ko there (one-turn ban)
+    // 3) ko detection: if exactly one stone was captured AND our group has exactly one liberty,
+    // and that liberty equals the captured point -> set ko there for one turn
     let newKo = null;
-    if (captured.length === 1 && myLibs.size === 1) {
-      const onlyLib = [...myLibs][0];
+    if (captured.length === 1 && myLibsSet.size === 1) {
+      const onlyLib = [...myLibsSet][0]; // "r,c"
       const [lr, lc] = onlyLib.split(",").map(Number);
       const [cr, cc] = captured[0];
-      if (lr === cr && lc === cc) newKo = { r: cr, c: cc };
+      if (lr === cr && lc === cc) {
+        newKo = { r: cr, c: cc };
+      }
     }
 
     setBoard(next);
@@ -89,17 +99,11 @@ export default function GoBoardApp() {
     setKo(newKo);
   }
 
-  // --- star (hoshi) points ---
-  function getStarTriplets(n) {
-    if (n === 19) return [3, 9, 15];
-    if (n === 13) return [3, 6, 9];
-    if (n === 9) return [2, 4, 6];
-    return [];
-  }
+  // Hoshi (star) points
   const starTriplets = getStarTriplets(size);
   const starCoords = [];
-  for (let r of starTriplets)
-    for (let c of starTriplets) starCoords.push({ r, c });
+  for (let rr of starTriplets)
+    for (let cc of starTriplets) starCoords.push({ r: rr, c: cc });
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 p-6 flex flex-col items-center">
@@ -166,7 +170,7 @@ export default function GoBoardApp() {
               />
             ))}
 
-            {/* Star points */}
+            {/* Star (hoshi) points */}
             {starCoords.map((pt, idx) => (
               <circle
                 key={`star-${idx}`}
@@ -177,17 +181,32 @@ export default function GoBoardApp() {
               />
             ))}
 
-            {/* Hover ghost stone */}
-            {hover && board[hover.r][hover.c] === 0 && (
+            {/* Ko marker (optional, subtle) */}
+            {ko && (
               <circle
-                cx={padding + hover.c * cell}
-                cy={padding + hover.r * cell}
-                r={cell * 0.45}
-                fill={turn === 1 ? "black" : "white"}
-                opacity={0.45}
-                stroke="#111"
+                cx={padding + ko.c * cell}
+                cy={padding + ko.r * cell}
+                r={cell * 0.18}
+                fill="none"
+                stroke="#b45309"
+                strokeDasharray="2,2"
+                strokeWidth={1.25}
               />
             )}
+
+            {/* Hover ghost stone (guarded) */}
+            {hover &&
+              inBounds(hover.r, hover.c, size) &&
+              safeAt(board, hover.r, hover.c) === 0 && (
+                <circle
+                  cx={padding + hover.c * cell}
+                  cy={padding + hover.r * cell}
+                  r={cell * 0.45}
+                  fill={turn === 1 ? "black" : "white"}
+                  opacity={0.45}
+                  stroke="#111"
+                />
+              )}
 
             {/* Stones */}
             {board.map((row, r) =>
@@ -219,7 +238,8 @@ export default function GoBoardApp() {
                   onMouseEnter={() => setHover({ r, c })}
                   onClick={() => playAt(r, c)}
                   style={{
-                    cursor: board[r][c] === 0 ? "pointer" : "not-allowed",
+                    cursor:
+                      safeAt(board, r, c) === 0 ? "pointer" : "not-allowed",
                   }}
                 />
               ))
@@ -231,7 +251,8 @@ export default function GoBoardApp() {
   );
 }
 
-// ---- helpers ----
+/* ================= Helpers ================= */
+
 function createBoard(n) {
   return Array.from({ length: n }, () => Array.from({ length: n }, () => 0));
 }
@@ -249,15 +270,15 @@ function neighbors(r, c, n) {
   ];
   const res = [];
   for (const [dr, dc] of dirs) {
-    const nr = r + dr,
-      nc = c + dc;
+    const nr = r + dr;
+    const nc = c + dc;
     if (inBounds(nr, nc, n)) res.push([nr, nc]);
   }
   return res;
 }
 
-function getGroup(board, r, c, n) {
-  const color = board[r][c];
+function getGroup(b, r, c, n) {
+  const color = b[r][c];
   const stack = [[r, c]];
   const seen = new Set([r + "," + c]);
   const group = [];
@@ -265,7 +286,7 @@ function getGroup(board, r, c, n) {
     const [cr, cc] = stack.pop();
     group.push([cr, cc]);
     for (const [nr, nc] of neighbors(cr, cc, n)) {
-      if (board[nr][nc] !== color) continue;
+      if (b[nr][nc] !== color) continue;
       const k = nr + "," + nc;
       if (!seen.has(k)) {
         seen.add(k);
@@ -276,20 +297,31 @@ function getGroup(board, r, c, n) {
   return group;
 }
 
-function countLiberties(board, group, n) {
-  return libertySet(board, group, n).size;
-}
-
-function libertySet(board, group, n) {
+function libertySet(b, group, n) {
   const libs = new Set();
   for (const [r, c] of group) {
     for (const [nr, nc] of neighbors(r, c, n)) {
-      if (board[nr][nc] === 0) libs.add(nr + "," + nc);
+      if (b[nr][nc] === 0) libs.add(nr + "," + nc);
     }
   }
   return libs;
 }
 
+function countLiberties(b, group, n) {
+  return libertySet(b, group, n).size;
+}
+
 function cloneBoard(b) {
   return b.map((row) => row.slice());
+}
+
+function safeAt(b, r, c) {
+  return b[r] && typeof b[r][c] !== "undefined" ? b[r][c] : 0;
+}
+
+function getStarTriplets(n) {
+  if (n === 19) return [3, 9, 15];
+  if (n === 13) return [3, 6, 9];
+  if (n === 9) return [2, 4, 6];
+  return [];
 }
